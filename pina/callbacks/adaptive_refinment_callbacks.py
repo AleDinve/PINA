@@ -1,8 +1,8 @@
 """PINA Callbacks Implementations"""
 
-# from lightning.pytorch.callbacks import Callback
-from pytorch_lightning.callbacks import Callback
 import torch
+from pytorch_lightning.callbacks import Callback
+from ..label_tensor import LabelTensor
 from ..utils import check_consistency
 
 
@@ -12,19 +12,22 @@ class R3Refinement(Callback):
         """
         PINA Implementation of an R3 Refinement Callback.
 
-        This callback implements the R3 (Retain-Resample-Release) routine for sampling new points based on adaptive search.
-        The algorithm incrementally accumulates collocation points in regions of high PDE residuals, and releases those
-        with low residuals. Points are sampled uniformly in all regions where sampling is needed.
+        This callback implements the R3 (Retain-Resample-Release) routine for
+        sampling new points based on adaptive search.
+        The algorithm incrementally accumulates collocation points in regions
+        of high PDE residuals, and releases those
+        with low residuals. Points are sampled uniformly in all regions
+        where sampling is needed.
 
         .. seealso::
 
-            Original Reference: Daw, Arka, et al. *Mitigating Propagation Failures in Physics-informed Neural Networks
+            Original Reference: Daw, Arka, et al. *Mitigating Propagation
+            Failures in Physics-informed Neural Networks
             using Retain-Resample-Release (R3) Sampling. (2023)*.
             DOI: `10.48550/arXiv.2207.02338
             <https://doi.org/10.48550/arXiv.2207.02338>`_
 
         :param int sample_every: Frequency for sampling.
-
         :raises ValueError: If `sample_every` is not an integer.
 
         Example:
@@ -35,6 +38,7 @@ class R3Refinement(Callback):
         # sample every
         check_consistency(sample_every, int)
         self._sample_every = sample_every
+        self._const_pts = None
 
     def _compute_residual(self, trainer):
         """
@@ -47,6 +51,18 @@ class R3Refinement(Callback):
         # extract the solver and device from trainer
         solver = trainer._model
         device = trainer._accelerator_connector._accelerator_flag
+        precision = trainer.precision
+        if precision == "64-true":
+            precision = torch.float64
+        elif precision == "32-true":
+            precision = torch.float32
+        else:
+            raise RuntimeError(
+                "Currently R3Refinement is only implemented "
+                "for precision '32-true' and '64-true', set "
+                "Trainer precision to match one of the "
+                "available precisions."
+            )
 
         # compute residual
         res_loss = {}
@@ -55,10 +71,10 @@ class R3Refinement(Callback):
             condition = solver.problem.conditions[location]
             pts = solver.problem.input_pts[location]
             # send points to correct device
-            pts = pts.to(device)
+            pts = pts.to(device=device, dtype=precision)
             pts = pts.requires_grad_(True)
             pts.retain_grad()
-            # PINN loss: equation evaluated only on locations where sampling is needed
+            # PINN loss: equation evaluated only for sampling locations
             target = condition.equation.residual(pts, solver.forward(pts))
             res_loss[location] = torch.abs(target).as_subclass(torch.Tensor)
             tot_loss.append(torch.abs(target))
@@ -79,39 +95,29 @@ class R3Refinement(Callback):
 
         # average loss
         avg = (tot_loss.mean()).to("cpu")
-
-        # points to keep
-        old_pts = {}
-        tot_points = 0
+        old_pts = {}  # points to be retained
         for location in self._sampling_locations:
             pts = trainer._model.problem.input_pts[location]
             labels = pts.labels
-            pts = pts.cpu().detach()
+            pts = pts.cpu().detach().as_subclass(torch.Tensor)
             residuals = res_loss[location].cpu()
             mask = (residuals > avg).flatten()
-            if any(
-                mask
-            ):  # if there are residuals greater than averge we append them
-                pts = pts[mask]  # TODO masking remove labels
+            if any(mask):  # append residuals greater than average
+                pts = (pts[mask]).as_subclass(LabelTensor)
                 pts.labels = labels
                 old_pts[location] = pts
-                tot_points += len(pts)
+                numb_pts = self._const_pts[location] - len(old_pts[location])
+                # sample new points
+                trainer._model.problem.discretise_domain(
+                    numb_pts, "random", locations=[location]
+                )
 
-        # extract new points to sample uniformally for each location
-        n_points = (self._tot_pop_numb - tot_points) // len(
-            self._sampling_locations
-        )
-        remainder = (self._tot_pop_numb - tot_points) % len(
-            self._sampling_locations
-        )
-        n_uniform_points = [n_points] * len(self._sampling_locations)
-        n_uniform_points[-1] += remainder
-
-        # sample new points
-        for numb_pts, loc in zip(n_uniform_points, self._sampling_locations):
-            trainer._model.problem.discretise_domain(
-                numb_pts, "random", locations=[loc]
-            )
+            else:  # if no res greater than average, samples all uniformly
+                numb_pts = self._const_pts[location]
+                # sample new points
+                trainer._model.problem.discretise_domain(
+                    numb_pts, "random", locations=[location]
+                )
         # adding previous population points
         trainer._model.problem.add_points(old_pts)
 
@@ -122,7 +128,8 @@ class R3Refinement(Callback):
         """
         Callback function called at the start of training.
 
-        This method extracts the locations for sampling from the problem conditions and calculates the total population.
+        This method extracts the locations for sampling from the problem
+        conditions and calculates the total population.
 
         :param trainer: The trainer object managing the training process.
         :type trainer: pytorch_lightning.Trainer
@@ -141,17 +148,18 @@ class R3Refinement(Callback):
         self._sampling_locations = locations
 
         # extract total population
-        total_population = 0
+        const_pts = {}  # for each location, store the # of pts to keep constant
         for location in self._sampling_locations:
             pts = trainer._model.problem.input_pts[location]
-            total_population += len(pts)
-        self._tot_pop_numb = total_population
+            const_pts[location] = len(pts)
+        self._const_pts = const_pts
 
     def on_train_epoch_end(self, trainer, __):
         """
         Callback function called at the end of each training epoch.
 
-        This method triggers the R3 routine for refinement if the current epoch is a multiple of `_sample_every`.
+        This method triggers the R3 routine for refinement if the current
+        epoch is a multiple of `_sample_every`.
 
         :param trainer: The trainer object managing the training process.
         :type trainer: pytorch_lightning.Trainer

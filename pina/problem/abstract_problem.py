@@ -2,6 +2,7 @@
 
 from abc import ABCMeta, abstractmethod
 from ..utils import merge_tensors, check_consistency
+from copy import deepcopy
 import torch
 
 
@@ -28,6 +29,23 @@ class AbstractProblem(metaclass=ABCMeta):
 
         # put in self.input_pts all the points that we don't need to sample
         self._span_condition_points()
+
+    def __deepcopy__(self, memo):
+        """
+        Implements deepcopy for the
+        :class:`~pina.problem.abstract_problem.AbstractProblem` class.
+
+        :param dict memo: Memory dictionary, to avoid excess copy
+        :return: The deep copy of the
+            :class:`~pina.problem.abstract_problem.AbstractProblem` class
+        :rtype: AbstractProblem
+        """
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, deepcopy(v, memo))
+        return result
 
     @property
     def input_variables(self):
@@ -177,15 +195,21 @@ class AbstractProblem(metaclass=ABCMeta):
             )
 
         # check consistency location
+        locations_to_sample = [
+            condition
+            for condition in self.conditions
+            if hasattr(self.conditions[condition], "location")
+        ]
         if locations == "all":
-            locations = [condition for condition in self.conditions]
+            # only locations that can be sampled
+            locations = locations_to_sample
         else:
             check_consistency(locations, str)
 
-        if sorted(locations) != sorted(self.conditions):
+        if sorted(locations) != sorted(locations_to_sample):
             TypeError(
                 f"Wrong locations for sampling. Location ",
-                f"should be in {self.conditions}.",
+                f"should be in {locations_to_sample}.",
             )
 
         # sampling
@@ -219,6 +243,9 @@ class AbstractProblem(metaclass=ABCMeta):
                 self.input_variables
             ):
                 self._have_sampled_points[location] = True
+                self.input_pts[location] = self.input_pts[location].extract(
+                    sorted(self.input_variables)
+                )
 
     def add_points(self, new_points):
         """
@@ -252,7 +279,7 @@ class AbstractProblem(metaclass=ABCMeta):
                 new_pts.labels = old_pts.labels
 
             # merging
-            merged_pts = torch.vstack([old_pts, new_points[location]])
+            merged_pts = torch.vstack([old_pts, new_pts])
             merged_pts.labels = old_pts.labels
             self.input_pts[location] = merged_pts
 
