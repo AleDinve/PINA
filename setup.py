@@ -12,15 +12,25 @@ URL = 'https://github.com/mathLab/PINA'
 MAIL = meta['__mail__']
 AUTHOR = meta['__author__']
 VERSION = meta['__version__']
-KEYWORDS = 'physics-informed neural-network'
+KEYWORDS = 'machine-learning deep-learning modeling pytorch ode neural-networks differential-equations pde hacktoberfest pinn physics-informed physics-informed-neural-networks neural-operators equation-learning lightining'
 
 REQUIRED = [
-    'numpy', 'matplotlib', 'torch', 'lightning', 'pytorch_lightning'
+    'numpy<2.0', 'matplotlib', 'torch', 'lightning', 'pytorch_lightning'
 ]
 
 EXTRAS = {
-    'docs': ['sphinx', 'sphinx_rtd_theme', 'sphinx_copybutton'],
-    'test': ['pytest', 'pytest-cov'],
+    'docs': [
+        'sphinx>5.0',
+        'sphinx_rtd_theme',
+        'sphinx_copybutton',
+        'sphinx_design',
+        'pydata_sphinx_theme'
+        ],
+    'test': [
+        'pytest',
+        'pytest-cov',
+        'scipy'
+    ],
 }
 
 LDESCRIPTION = (
@@ -44,10 +54,11 @@ setup(
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering :: Mathematics'
     ],

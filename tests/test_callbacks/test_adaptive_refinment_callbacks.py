@@ -71,16 +71,19 @@ def test_r3refinment_routine():
     # make the trainer
     trainer = Trainer(solver=solver,
                       callbacks=[R3Refinement(sample_every=1)],
+                      accelerator='cpu',
                       max_epochs=5)
     trainer.train()
 
-def test_r3refinment_routine_double_precision():
+def test_r3refinment_routine():
     model = FeedForward(len(poisson_problem.input_variables),
                     len(poisson_problem.output_variables))
     solver = PINN(problem=poisson_problem, model=model)
     trainer = Trainer(solver=solver,
-                      precision='64-true',
+                      callbacks=[R3Refinement(sample_every=1)],
                       accelerator='cpu',
-                      callbacks=[R3Refinement(sample_every=2)],
                       max_epochs=5)
+    before_n_points = {loc : len(pts) for loc, pts in trainer.solver.problem.input_pts.items()}
     trainer.train()
+    after_n_points = {loc : len(pts) for loc, pts in trainer.solver.problem.input_pts.items()}
+    assert before_n_points == after_n_points

@@ -9,9 +9,12 @@ __all__ = [
     "FourierBlock2D",
     "FourierBlock3D",
     "PODBlock",
+    "OrthogonalBlock",
     "PeriodicBoundaryEmbedding",
+    "FourierFeatureEmbedding",
     "AVNOBlock",
     "LowRankBlock",
+    "RBFBlock",
 ]
 
 from .convolution_2d import ContinuousConvBlock
@@ -23,6 +26,8 @@ from .spectral import (
 )
 from .fourier import FourierBlock1D, FourierBlock2D, FourierBlock3D
 from .pod import PODBlock
-from .embedding import PeriodicBoundaryEmbedding
+from .orthogonal import OrthogonalBlock
+from .embedding import PeriodicBoundaryEmbedding, FourierFeatureEmbedding
 from .avno_layer import AVNOBlock
 from .lowrank_layer import LowRankBlock
+from .rbf_layer import RBFBlock

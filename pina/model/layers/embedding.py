@@ -1,7 +1,8 @@
-""" Periodic Boundary Embedding modulus. """
+""" Embedding modulus. """
 
 import torch
 from pina.utils import check_consistency
+from typing import Union, Sequence
 
 
 class PeriodicBoundaryEmbedding(torch.nn.Module):
@@ -100,7 +101,7 @@ class PeriodicBoundaryEmbedding(torch.nn.Module):
         Forward pass to compute the periodic boundary conditions embedding.
 
         :param torch.Tensor x: Input tensor.
-        :return: Fourier embeddings of the input.
+        :return: Periodic embedding of the input.
         :rtype: torch.Tensor
         """
         omega = torch.stack(
@@ -155,3 +156,106 @@ class PeriodicBoundaryEmbedding(torch.nn.Module):
         The period of the periodic function to approximate.
         """
         return self._period
+
+
+class FourierFeatureEmbedding(torch.nn.Module):
+    def __init__(self, input_dimension, output_dimension, sigma):
+        r"""
+        Fourier Feature Embedding class for encoding input features
+        using random Fourier features.This class applies a Fourier
+        transformation to the input features,
+        which can help in learning high-frequency variations in data.
+        If multiple sigma are provided, the class
+        supports multiscale feature embedding, creating embeddings for
+        each scale specified by the sigma.
+
+        The :obj:`FourierFeatureEmbedding` augments the input
+        by the following formula (3.10 of original paper):
+
+        .. math::
+            \mathbf{x} \rightarrow \tilde{\mathbf{x}} = \left[
+            \cos\left( \mathbf{B} \mathbf{x} \right),
+            \sin\left( \mathbf{B} \mathbf{x} \right)\right],
+
+        where :math:`\mathbf{B}_{ij} \sim \mathcal{N}(0, \sigma^2)`.
+
+        In case multiple ``sigma`` are passed, the resulting embeddings
+        are concateneted:
+
+        .. math::
+            \mathbf{x} \rightarrow \tilde{\mathbf{x}} = \left[
+            \cos\left( \mathbf{B}^1 \mathbf{x} \right),
+            \sin\left( \mathbf{B}^1 \mathbf{x} \right),
+            \cos\left( \mathbf{B}^2 \mathbf{x} \right),
+            \sin\left( \mathbf{B}^3 \mathbf{x} \right),
+            \dots,
+            \cos\left( \mathbf{B}^M \mathbf{x} \right),
+            \sin\left( \mathbf{B}^M \mathbf{x} \right)\right],
+
+        where :math:`\mathbf{B}^k_{ij} \sim \mathcal{N}(0, \sigma_k^2) \quad
+        k \in (1, \dots, M)`.
+
+        .. seealso::
+            **Original reference**:
+            Wang, Sifan, Hanwen Wang, and Paris Perdikaris. *On the eigenvector
+            bias of Fourier feature networks: From regression to solving
+            multi-scale PDEs with physics-informed neural networks.*
+            Computer Methods in Applied Mechanics and
+            Engineering 384 (2021): 113938.
+            DOI: `10.1016/j.cma.2021.113938.
+            <https://doi.org/10.1016/j.cma.2021.113938>`_
+
+        :param int input_dimension: The input vector dimension of the layer.
+        :param int output_dimension: The output dimension of the layer. The
+            output is obtained as a concatenation of the cosine and sine
+            embedding, hence it must be a multiple of two (even number).
+        :param int | float sigma: The standard deviation used for the
+            Fourier Embedding. This value must reflect the granularity of the
+            scale in the differential equation solution.
+        """
+        super().__init__()
+
+        # check consistency
+        check_consistency(sigma, (int, float))
+        check_consistency(output_dimension, int)
+        check_consistency(input_dimension, int)
+        if output_dimension % 2:
+            raise RuntimeError(
+                "Expected output_dimension to be a even number, "
+                f"got {output_dimension}."
+            )
+
+        # assign sigma
+        self._sigma = sigma
+
+        # create non-trainable matrices
+        self._matrix = (
+            torch.rand(
+                size=(input_dimension, output_dimension // 2),
+                requires_grad=False,
+            )
+            * self.sigma
+        )
+
+    def forward(self, x):
+        """
+        Forward pass to compute the fourier embedding.
+
+        :param torch.Tensor x: Input tensor.
+        :return: Fourier embeddings of the input.
+        :rtype: torch.Tensor
+        """
+        # compute random matrix multiplication
+        out = torch.mm(x, self._matrix.to(device=x.device, dtype=x.dtype))
+        # return embedding
+        return torch.cat(
+            [torch.cos(2 * torch.pi * out), torch.sin(2 * torch.pi * out)],
+            dim=-1,
+        )
+
+    @property
+    def sigma(self):
+        """
+        Returning the variance of the sampled matrix for Fourier Embedding.
+        """
+        return self._sigma
